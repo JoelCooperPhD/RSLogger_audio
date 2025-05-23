@@ -1,63 +1,109 @@
+import asyncio
 import sounddevice as sd
 import soundfile as sf
 import numpy as np
-from typing import Optional
-import time
-import threading
-import queue
+from typing import Optional, Dict, Any
+from pathlib import Path
+from dataclasses import dataclass
 
 
+@dataclass
+class RecordingConfig:
+    samplerate: int = 44100
+    channels: int = 1
+    dtype: str = 'float32'
+    
+    
 class AudioRecorder:
-    def __init__(self, samplerate: int = 44100, channels: int = 1):
-        self.samplerate = samplerate
-        self.channels = channels
-        self.recording = False
-        self.audio_queue = queue.Queue()
+    def __init__(self, config: RecordingConfig = RecordingConfig()):
+        self.config = config
+        self._recording = False
+        self._audio_queue: asyncio.Queue[np.ndarray] = asyncio.Queue()
         
-    def callback(self, indata, frames, time, status):
+    def _audio_callback(self, indata: np.ndarray, frames: int, 
+                       time_info: Any, status: sd.CallbackFlags) -> None:
         if status:
-            print(status)
-        self.audio_queue.put(indata.copy())
+            print(f"Audio callback status: {status}")
         
-    def record(self, filename: str, duration: Optional[float] = None):
-        print(f"Recording to {filename}...")
-        print("Press Ctrl+C to stop recording" if not duration else f"Recording for {duration} seconds...")
-        
-        audio_data = []
-        
-        with sd.InputStream(samplerate=self.samplerate,
-                          channels=self.channels,
-                          callback=self.callback):
+        try:
+            self._audio_queue.put_nowait(indata.copy())
+        except asyncio.QueueFull:
+            print("Warning: Audio queue full, dropping frames")
             
-            start_time = time.time()
-            self.recording = True
+    async def record(self, output_path: Path, duration: Optional[float] = None) -> None:
+        print(f"Recording to {output_path}...")
+        if duration:
+            print(f"Recording for {duration} seconds...")
+        else:
+            print("Press Ctrl+C to stop recording")
             
-            try:
-                while self.recording:
-                    if duration and (time.time() - start_time) >= duration:
+        audio_chunks: list[np.ndarray] = []
+        self._recording = True
+        
+        stream = sd.InputStream(
+            samplerate=self.config.samplerate,
+            channels=self.config.channels,
+            dtype=self.config.dtype,
+            callback=self._audio_callback
+        )
+        
+        try:
+            with stream:
+                start_time = asyncio.get_event_loop().time()
+                
+                while self._recording:
+                    if duration and (asyncio.get_event_loop().time() - start_time) >= duration:
                         break
-                    
+                        
                     try:
-                        data = self.audio_queue.get(timeout=0.1)
-                        audio_data.append(data)
-                    except queue.Empty:
+                        chunk = await asyncio.wait_for(
+                            self._audio_queue.get(), 
+                            timeout=0.1
+                        )
+                        audio_chunks.append(chunk)
+                    except asyncio.TimeoutError:
                         continue
                         
-            except KeyboardInterrupt:
-                print("\nRecording stopped by user")
+        except asyncio.CancelledError:
+            print("\nRecording cancelled")
+            raise
+        finally:
+            self._recording = False
+            await self._save_recording(audio_chunks, output_path)
             
-            self.recording = False
-        
-        if audio_data:
-            audio_array = np.concatenate(audio_data, axis=0)
-            sf.write(filename, audio_array, self.samplerate)
-            duration_recorded = len(audio_array) / self.samplerate
-            print(f"Saved {duration_recorded:.2f} seconds of audio to {filename}")
-        else:
+    async def _save_recording(self, audio_chunks: list[np.ndarray], 
+                            output_path: Path) -> None:
+        if not audio_chunks:
             print("No audio data recorded")
-    
-    def get_default_device_info(self):
-        device_info = sd.query_devices(kind='input')
+            return
+            
+        audio_data = np.concatenate(audio_chunks, axis=0)
+        
+        # Save asynchronously using asyncio's thread pool
+        loop = asyncio.get_event_loop()
+        await loop.run_in_executor(
+            None, 
+            sf.write, 
+            str(output_path), 
+            audio_data, 
+            self.config.samplerate
+        )
+        
+        duration_seconds = len(audio_data) / self.config.samplerate
+        print(f"Saved {duration_seconds:.2f} seconds of audio to {output_path}")
+        
+    def stop(self) -> None:
+        self._recording = False
+        
+    async def get_device_info(self) -> Dict[str, Any]:
+        loop = asyncio.get_event_loop()
+        device_info = await loop.run_in_executor(
+            None,
+            sd.query_devices,
+            None,
+            'input'
+        )
+        
         return {
             'name': device_info['name'],
             'channels': device_info['max_input_channels'],

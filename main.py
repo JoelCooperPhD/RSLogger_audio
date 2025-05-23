@@ -1,12 +1,36 @@
-import sys
+import asyncio
 import argparse
 from datetime import datetime
 from pathlib import Path
+import signal
+from typing import Optional
 
-from src.recorder import AudioRecorder
+from src.recorder import AudioRecorder, RecordingConfig
 
 
-def main():
+async def handle_recording(recorder: AudioRecorder, output_path: Path, 
+                          duration: Optional[float]) -> None:
+    """Handle the recording process with proper signal handling."""
+    
+    # Create task for recording
+    recording_task = asyncio.create_task(
+        recorder.record(output_path, duration)
+    )
+    
+    # Setup signal handler for graceful shutdown
+    def signal_handler(sig, frame):
+        recorder.stop()
+        recording_task.cancel()
+        
+    signal.signal(signal.SIGINT, signal_handler)
+    
+    try:
+        await recording_task
+    except asyncio.CancelledError:
+        print("\nRecording stopped by user")
+        
+
+async def main() -> None:
     parser = argparse.ArgumentParser(
         description="RSLogger Audio - Simple audio recording CLI"
     )
@@ -38,10 +62,13 @@ def main():
     
     args = parser.parse_args()
     
-    recorder = AudioRecorder(samplerate=args.samplerate)
+    # Create recorder with configuration
+    config = RecordingConfig(samplerate=args.samplerate)
+    recorder = AudioRecorder(config)
     
+    # Handle device info request
     if args.info:
-        info = recorder.get_default_device_info()
+        info = await recorder.get_device_info()
         print("Default Input Device:")
         print(f"  Name: {info['name']}")
         print(f"  Max channels: {info['channels']}")
@@ -49,21 +76,30 @@ def main():
         return
     
     # Generate filename if not provided
-    if not args.filename:
+    filename = args.filename
+    if not filename:
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        args.filename = f"recording_{timestamp}.wav"
+        filename = f"recording_{timestamp}.wav"
     
     # Ensure .wav extension
-    if not args.filename.endswith('.wav'):
-        args.filename += '.wav'
+    if not filename.endswith('.wav'):
+        filename += '.wav'
     
-    # Create recordings directory if it doesn't exist
-    output_path = Path("recordings") / args.filename
+    # Create output path
+    output_path = Path("recordings") / filename
     output_path.parent.mkdir(exist_ok=True)
     
-    # Record audio
-    recorder.record(str(output_path), duration=args.duration)
+    # Start recording
+    await handle_recording(recorder, output_path, args.duration)
+
+
+def run() -> None:
+    """Entry point that runs the async main function."""
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        print("\nShutting down...")
 
 
 if __name__ == "__main__":
-    main()
+    run()
