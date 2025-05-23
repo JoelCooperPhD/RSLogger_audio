@@ -1,0 +1,7 @@
+[project]
+name = "rslogger-microphone"
+version = "0.1.0"
+description = "Microphone logging application for audio data acquisition"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = []
