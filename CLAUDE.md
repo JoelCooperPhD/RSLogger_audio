@@ -35,9 +35,9 @@ Always ask for clarification if requirements are ambiguous, but make reasonable 
 
 ## Project Overview
 
-RSLogger-microphone is a professional audio recording application designed for research data acquisition. It provides a robust CLI interface for high-quality audio capture with extensive configuration options.
+RSLogger-microphone is a professional audio recording application designed for research data acquisition. It provides both standalone operation and distributed MQTT-based control for integration into larger logging ecosystems.
 
-**Current Status**: Fully functional with comprehensive test coverage (97%).
+**Current Status**: Fully functional with comprehensive test coverage (85%). The module can operate independently or as part of a distributed system controlled via MQTT.
 
 ## Development Commands
 
@@ -68,11 +68,16 @@ python main.py --reset-config  # Reset to factory defaults
 pytest
 pytest -v  # Verbose output
 pytest --cov=src --cov-report=term-missing  # Coverage report
+
+# MQTT Module Operation
+python mqtt_recorder_service.py --id mic1  # Start MQTT-controlled recorder
+python mqtt_recorder_service.py --id mic1 --broker mqtt.example.com  # Custom broker
+python master_controller_example.py  # Run example master controller
 ```
 
 ## Architecture Notes
 
-### Current Implementation
+### Standalone Operation
 
 **Core Architecture:**
 - Fully asynchronous design using asyncio for efficient I/O operations
@@ -88,16 +93,39 @@ pytest --cov=src --cov-report=term-missing  # Coverage report
 - Graceful interrupt handling (Ctrl+C) with proper cleanup
 - Comprehensive error handling and user feedback
 
+### MQTT Distributed Operation
+
+**Architecture:**
+- Independent process operation - module crashes don't affect other components
+- MQTT pub/sub communication for loose coupling
+- Master-slave control pattern with multiple recorder modules
+- Automatic module discovery and health monitoring
+- Synchronized recording across multiple devices
+
+**MQTT Components:**
+- `src/mqtt_recorder.py`: MQTT-enabled audio recorder with command handling
+- `src/mqtt_config.py`: Extended configuration for MQTT settings
+- `mqtt_recorder_service.py`: Service entry point for MQTT modules
+- `master_controller_example.py`: Example master controller implementation
+
+**MQTT Topics:**
+- `rslogger/audio/{module_id}/command`: Receives control commands
+- `rslogger/audio/{module_id}/status`: Publishes module status
+- `rslogger/audio/{module_id}/response`: Command acknowledgments
+- `rslogger/audio/{module_id}/data`: Data events (recording complete, etc.)
+
 **Key Components:**
-- `main.py`: CLI entry point with comprehensive argparse configuration
-- `src/recorder.py`: Async AudioRecorder class using sounddevice callbacks with asyncio.Queue
-- `src/config.py`: Configuration management with validation and persistence
+- `main.py`: Standalone CLI entry point
+- `src/recorder.py`: Core async AudioRecorder class
+- `src/config.py`: Basic configuration management
+- `src/mqtt_recorder.py`: MQTT wrapper for distributed operation
 
 **Data Flow:**
 1. Audio callback fills asyncio.Queue with numpy arrays
 2. Async coroutine consumes queue and writes to disk
 3. Metadata JSON created with recording parameters
-4. All operations handled asynchronously for optimal performance
+4. MQTT events published for master controller tracking
+5. All operations handled asynchronously for optimal performance
 
 ## Dependencies
 
@@ -106,6 +134,7 @@ Core dependencies as defined in `pyproject.toml`:
 - sounddevice: Cross-platform audio I/O
 - soundfile: Reading and writing audio files
 - numpy: Efficient array operations for audio data
+- asyncio-mqtt: MQTT client for distributed operation
 
 Development dependencies:
 - pytest: Testing framework
@@ -115,13 +144,45 @@ Development dependencies:
 
 ## Testing
 
-The project includes a comprehensive test suite with 97% code coverage:
+The project includes a comprehensive test suite with 85% code coverage:
 - `tests/test_recorder.py`: Tests for audio recording functionality
 - `tests/test_config.py`: Tests for configuration management
 - `tests/test_cli.py`: Tests for CLI argument parsing
+- `tests/test_mqtt_recorder.py`: Tests for MQTT recorder functionality
+- `tests/test_mqtt_config.py`: Tests for MQTT configuration
 - `tests/conftest.py`: Shared pytest fixtures
 
 Run tests with coverage:
 ```bash
 pytest --cov=src --cov-report=term-missing
+```
+
+## Usage Examples
+
+### Standalone Recording
+```bash
+# Basic recording
+python main.py
+
+# Record for 30 seconds with custom settings
+python main.py --duration 30 --samplerate 48000 --channels 2
+
+# Use specific device
+python main.py --device "USB Microphone" --duration 60
+```
+
+### Distributed MQTT Recording
+```bash
+# Terminal 1 - Start MQTT broker
+mosquitto -v
+
+# Terminal 2 - Start first recorder module
+python mqtt_recorder_service.py --id mic1
+
+# Terminal 3 - Start second recorder module  
+python mqtt_recorder_service.py --id mic2 --device "USB Audio"
+
+# Terminal 4 - Control from master
+python master_controller_example.py
+# Then use menu to start/stop recordings on all modules
 ```
