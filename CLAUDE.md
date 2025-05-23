@@ -35,31 +35,93 @@ Always ask for clarification if requirements are ambiguous, but make reasonable 
 
 ## Project Overview
 
-RSLogger_microphone is a microphone logging application designed for audio data acquisition and recording for research purposes.
+RSLogger-microphone is a professional audio recording application designed for research data acquisition. It provides a robust CLI interface for high-quality audio capture with extensive configuration options.
 
-**Current Status**: Initial skeleton - core functionality not yet implemented.
+**Current Status**: Fully functional with comprehensive test coverage (97%).
 
 ## Development Commands
 
 ```bash
-# Run the application
-python3 main.py
-
-# Install dependencies (when added)
+# Install dependencies
 pip install -e .
+
+# Run the application
+python main.py [options]
+
+# Basic recording (saves to recordings/ directory)
+python main.py
+
+# Record with custom settings
+python main.py --duration 10 --samplerate 48000 --channels 2
+
+# Device management
+python main.py --list-devices  # List all available audio devices
+python main.py --info          # Show detailed system audio info
+python main.py --device "USB Audio"  # Use specific device by name
+
+# Configuration management
+python main.py --save-config   # Save current settings as defaults
+python main.py --show-config   # Display current configuration
+python main.py --reset-config  # Reset to factory defaults
+
+# Run tests
+pytest
+pytest -v  # Verbose output
+pytest --cov=src --cov-report=term-missing  # Coverage report
 ```
 
 ## Architecture Notes
 
-Current implementation:
-- Simple CLI using argparse for audio recording control
-- Audio capture using python-sounddevice library
-- WAV file output using soundfile library
-- Default microphone recording with configurable sample rate
-- Automatic timestamped filenames
-- Recordings saved to `recordings/` directory
+### Current Implementation
 
-Key components:
-- `main.py`: CLI entry point with argument parsing
-- `src/recorder.py`: Core AudioRecorder class using sounddevice callbacks
-- Queue-based audio data collection for smooth recording
+**Core Architecture:**
+- Fully asynchronous design using asyncio for efficient I/O operations
+- Non-blocking audio capture with python-sounddevice library
+- WAV file output using soundfile library with proper resource management
+- JSON metadata saved alongside each recording for research traceability
+
+**Key Features:**
+- Configurable audio parameters (sample rate, channels, format)
+- Device selection by name or ID with automatic fallback to defaults
+- Persistent configuration management via JSON
+- Automatic timestamped filenames (ISO 8601 format)
+- Graceful interrupt handling (Ctrl+C) with proper cleanup
+- Comprehensive error handling and user feedback
+
+**Key Components:**
+- `main.py`: CLI entry point with comprehensive argparse configuration
+- `src/recorder.py`: Async AudioRecorder class using sounddevice callbacks with asyncio.Queue
+- `src/config.py`: Configuration management with validation and persistence
+
+**Data Flow:**
+1. Audio callback fills asyncio.Queue with numpy arrays
+2. Async coroutine consumes queue and writes to disk
+3. Metadata JSON created with recording parameters
+4. All operations handled asynchronously for optimal performance
+
+## Dependencies
+
+Core dependencies as defined in `pyproject.toml`:
+- Python 3.8+
+- sounddevice: Cross-platform audio I/O
+- soundfile: Reading and writing audio files
+- numpy: Efficient array operations for audio data
+
+Development dependencies:
+- pytest: Testing framework
+- pytest-asyncio: Async test support
+- pytest-cov: Coverage reporting
+- pytest-mock: Mocking support
+
+## Testing
+
+The project includes a comprehensive test suite with 97% code coverage:
+- `tests/test_recorder.py`: Tests for audio recording functionality
+- `tests/test_config.py`: Tests for configuration management
+- `tests/test_cli.py`: Tests for CLI argument parsing
+- `tests/conftest.py`: Shared pytest fixtures
+
+Run tests with coverage:
+```bash
+pytest --cov=src --cov-report=term-missing
+```
