@@ -102,7 +102,7 @@ pytest --cov=src --cov-report=term-missing  # Coverage report
 ## Dependencies
 
 Core dependencies as defined in `pyproject.toml`:
-- Python 3.8+
+- Python 3.11+
 - sounddevice: Cross-platform audio I/O
 - soundfile: Reading and writing audio files
 - numpy: Efficient array operations for audio data
