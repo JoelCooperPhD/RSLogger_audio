@@ -51,9 +51,15 @@ class TestCLI:
             {'id': 1, 'name': 'USB Mic', 'channels': 1, 'samplerate': 48000}
         ]
         
+        from src.devices import AudioDevice
+        mock_device_objs = [
+            AudioDevice(id=0, name='Built-in Mic', channels=2, samplerate=44100),
+            AudioDevice(id=1, name='USB Mic', channels=1, samplerate=48000)
+        ]
+        
         with patch('sys.argv', ['main.py', '--list-devices']):
-            with patch('src.recorder.AudioRecorder.list_input_devices', new_callable=AsyncMock) as mock_list:
-                mock_list.return_value = mock_devices
+            with patch('src.devices.DeviceManager.list_input_devices', new_callable=AsyncMock) as mock_list:
+                mock_list.return_value = mock_device_objs
                 
                 await main()
                 
@@ -71,9 +77,17 @@ class TestCLI:
             'samplerate': 48000.0
         }
         
+        from src.devices import AudioDevice
+        mock_device_obj = AudioDevice(
+            id=1,
+            name='USB Mic',
+            channels=2,
+            samplerate=48000.0
+        )
+        
         with patch('sys.argv', ['main.py', '--device', '1', '--info']):
-            with patch('src.recorder.AudioRecorder.get_device_info', new_callable=AsyncMock) as mock_get:
-                mock_get.return_value = mock_info
+            with patch('src.devices.DeviceManager.get_device_info', new_callable=AsyncMock) as mock_get:
+                mock_get.return_value = mock_device_obj
                 
                 await main()
                 
@@ -111,7 +125,9 @@ class TestCLI:
             with patch('main.AudioRecorder') as MockRecorder:
                 mock_instance = MockRecorder.return_value
                 mock_instance.record = AsyncMock()
-                mock_instance.get_device_info = AsyncMock(return_value={'id': 2})
+                from src.devices import AudioDevice
+                with patch('src.devices.DeviceManager.get_device_info', new_callable=AsyncMock) as mock_get:
+                    mock_get.return_value = AudioDevice(id=2, name='USB Device', channels=2, samplerate=48000)
                 
                 with patch('pathlib.Path.mkdir'):
                     await main()
@@ -148,7 +164,9 @@ class TestCLI:
             with patch('main.AudioRecorder') as MockRecorder:
                 mock_instance = MockRecorder.return_value
                 mock_instance.record = AsyncMock()
-                mock_instance.get_device_info = AsyncMock(return_value={'id': 1, 'name': 'USB Mic'})
+                from src.devices import AudioDevice
+                with patch('src.devices.DeviceManager.get_device_info', new_callable=AsyncMock) as mock_get:
+                    mock_get.return_value = AudioDevice(id=1, name='USB Mic', channels=2, samplerate=48000)
                 mock_instance.list_input_devices = AsyncMock(return_value=[])
                 
                 with patch('pathlib.Path.mkdir'):

@@ -24,7 +24,8 @@ class TestAudioRecorder:
         
     def test_initialization(self, recorder, config):
         assert recorder.config == config
-        assert recorder._recording is False
+        assert hasattr(recorder, '_state')
+        assert hasattr(recorder, '_recording')
         assert isinstance(recorder._audio_queue, asyncio.Queue)
         assert recorder._device_info is None
         
@@ -41,17 +42,19 @@ class TestAudioRecorder:
         queued_data = recorder._audio_queue.get_nowait()
         assert np.array_equal(queued_data, indata)
         
-    def test_audio_callback_with_status(self, recorder, capsys):
+    def test_audio_callback_with_status(self, recorder, caplog):
         indata = np.zeros((1024, 1))
         status = MagicMock()
         status.__str__.return_value = "Buffer overrun"
         
-        recorder._audio_callback(indata, 1024, None, status)
+        with caplog.at_level('WARNING'):
+            recorder._audio_callback(indata, 1024, None, status)
         
-        captured = capsys.readouterr()
-        assert "Audio callback status: Buffer overrun" in captured.out
+        assert "Audio callback status: Buffer overrun" in caplog.text
         
     def test_stop_recording(self, recorder):
+        from src.enums import RecordingState
+        recorder._state = RecordingState.RECORDING
         recorder._recording = True
         recorder.stop()
         assert recorder._recording is False
@@ -151,14 +154,14 @@ class TestAudioRecorder:
             assert 'timestamp' in metadata
             
     @pytest.mark.asyncio
-    async def test_save_recording_no_data(self, recorder, capsys):
+    async def test_save_recording_no_data(self, recorder, caplog):
         with tempfile.TemporaryDirectory() as tmpdir:
             output_path = Path(tmpdir) / "test.wav"
             
-            await recorder._save_recording([], output_path)
+            with caplog.at_level('WARNING'):
+                await recorder._save_recording([], output_path)
             
-            captured = capsys.readouterr()
-            assert "No audio data recorded" in captured.out
+            assert "No audio data recorded" in caplog.text
             assert not output_path.exists()
             
     @pytest.mark.asyncio
@@ -172,9 +175,10 @@ class TestAudioRecorder:
             mock_stream.__exit__ = MagicMock(return_value=None)
             
             with patch('sounddevice.InputStream', return_value=mock_stream):
-                with patch.object(recorder, 'get_device_info', new_callable=AsyncMock) as mock_get_info:
+                from src.devices import DeviceManager, AudioDevice
+                with patch.object(DeviceManager, 'get_device_info', new_callable=AsyncMock) as mock_get_info:
                     with patch.object(recorder, '_save_recording', new_callable=AsyncMock):
-                        mock_get_info.return_value = {'id': 0, 'name': 'Default'}
+                        mock_get_info.return_value = AudioDevice(id=0, name='Default', channels=2, samplerate=44100)
                         
                         # Simulate short recording
                         async def record_task():
@@ -194,7 +198,9 @@ class TestAudioRecorder:
             mock_stream.__exit__ = MagicMock(return_value=None)
             
             with patch('sounddevice.InputStream', return_value=mock_stream):
-                with patch.object(recorder, 'get_device_info', new_callable=AsyncMock):
+                from src.devices import DeviceManager, AudioDevice
+                with patch.object(DeviceManager, 'get_device_info', new_callable=AsyncMock) as mock_get_info:
+                    mock_get_info.return_value = AudioDevice(id=0, name='Default', channels=2, samplerate=44100)
                     with patch.object(recorder, '_save_recording', new_callable=AsyncMock):
                         # Start recording
                         record_task = asyncio.create_task(

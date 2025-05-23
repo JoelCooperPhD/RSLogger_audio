@@ -1,12 +1,24 @@
 import asyncio
-import argparse
+import logging
 from datetime import datetime
 from pathlib import Path
 import signal
-from typing import Optional
+from typing import Optional, Any
+from types import FrameType
 
 from src.recorder import AudioRecorder, RecordingConfig
 from src.config import ConfigManager
+from src.cli import parse_args
+from src.devices import DeviceManager
+
+
+# Setup logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    datefmt='%Y-%m-%d %H:%M:%S'
+)
+logger = logging.getLogger(__name__)
 
 
 async def handle_recording(recorder: AudioRecorder, output_path: Path, 
@@ -19,7 +31,7 @@ async def handle_recording(recorder: AudioRecorder, output_path: Path,
     )
     
     # Setup signal handler for graceful shutdown
-    def signal_handler(sig, frame):
+    def signal_handler(sig: int, frame: Optional[FrameType]) -> None:
         recorder.stop()
         recording_task.cancel()
         
@@ -28,7 +40,7 @@ async def handle_recording(recorder: AudioRecorder, output_path: Path,
     try:
         await recording_task
     except asyncio.CancelledError:
-        print("\nRecording stopped by user")
+        logger.info("Recording stopped by user")
         
 
 async def main() -> None:
@@ -36,82 +48,8 @@ async def main() -> None:
     config_manager = ConfigManager()
     default_config = config_manager.load()
     
-    parser = argparse.ArgumentParser(
-        description="RSLogger Audio - Simple audio recording CLI"
-    )
-    
-    parser.add_argument(
-        "filename",
-        nargs="?",
-        help="Output filename (default: timestamp-based name)"
-    )
-    
-    parser.add_argument(
-        "-d", "--duration",
-        type=float,
-        help="Recording duration in seconds (default: record until Ctrl+C)"
-    )
-    
-    parser.add_argument(
-        "-r", "--samplerate",
-        type=int,
-        default=default_config.samplerate,
-        help=f"Sample rate in Hz (default: {default_config.samplerate})"
-    )
-    
-    parser.add_argument(
-        "-o", "--output-dir",
-        type=str,
-        default=default_config.output_dir,
-        help=f"Output directory (default: {default_config.output_dir})"
-    )
-    
-    parser.add_argument(
-        "-c", "--channels",
-        type=int,
-        default=default_config.channels,
-        help=f"Number of channels (1=mono, 2=stereo, default: {default_config.channels})"
-    )
-    
-    parser.add_argument(
-        "--device",
-        type=str,
-        default=default_config.device,
-        help="Audio input device (name or ID)"
-    )
-    
-    parser.add_argument(
-        "--info",
-        action="store_true",
-        help="Show audio device information"
-    )
-    
-    parser.add_argument(
-        "--list-devices",
-        action="store_true",
-        help="List all available input devices"
-    )
-    
-    # Config management arguments
-    parser.add_argument(
-        "--save-config",
-        action="store_true",
-        help="Save current settings as defaults"
-    )
-    
-    parser.add_argument(
-        "--show-config",
-        action="store_true",
-        help="Show current configuration"
-    )
-    
-    parser.add_argument(
-        "--reset-config",
-        action="store_true",
-        help="Reset configuration to defaults"
-    )
-    
-    args = parser.parse_args()
+    # Parse command line arguments
+    args = parse_args(default_config)
     
     # Handle config management commands
     if args.show_config:
@@ -129,18 +67,13 @@ async def main() -> None:
         print("Configuration reset to defaults")
         return
     
-    # Parse device argument
-    device = args.device
-    if device and device.isdigit():
-        device = int(device)
-    
     # Create recorder with configuration
     config = RecordingConfig(
         samplerate=args.samplerate,
         channels=args.channels,
         dtype=default_config.dtype,
         output_dir=args.output_dir,
-        device=device
+        device=args.device
     )
     
     # Save config if requested
@@ -153,20 +86,20 @@ async def main() -> None:
     
     # Handle device listing
     if args.list_devices:
-        devices = await recorder.list_input_devices()
+        devices = await DeviceManager.list_input_devices()
         print("Available input devices:")
         for dev in devices:
-            print(f"  {dev['id']}: {dev['name']} ({dev['channels']} ch, {int(dev['samplerate'])} Hz)")
+            print(f"  {dev.id}: {dev.name} ({dev.channels} ch, {int(dev.samplerate)} Hz)")
         return
     
     # Handle device info request
     if args.info:
-        info = await recorder.get_device_info(config.device)
-        device_label = f"Device {info['id']}" if info['id'] is not None else "Default Device"
+        info = await DeviceManager.get_device_info(config.device)
+        device_label = f"Device {info.id}" if info.id is not None else "Default Device"
         print(f"{device_label}:")
-        print(f"  Name: {info['name']}")
-        print(f"  Max channels: {info['channels']}")
-        print(f"  Default sample rate: {info['samplerate']} Hz")
+        print(f"  Name: {info.name}")
+        print(f"  Max channels: {info.channels}")
+        print(f"  Default sample rate: {info.samplerate} Hz")
         return
     
     # Generate filename if not provided
@@ -174,8 +107,8 @@ async def main() -> None:
     if not filename:
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         # Get device info for filename
-        device_info = await recorder.get_device_info(config.device)
-        device_id = f"_device{device_info['id']}" if device_info['id'] is not None else ""
+        device_info = await DeviceManager.get_device_info(config.device)
+        device_id = f"_device{device_info.id}" if device_info.id is not None else ""
         filename = f"recording_{timestamp}{device_id}.wav"
     
     # Ensure .wav extension
@@ -195,7 +128,7 @@ def run() -> None:
     try:
         asyncio.run(main())
     except KeyboardInterrupt:
-        print("\nShutting down...")
+        logger.info("Shutting down")
 
 
 if __name__ == "__main__":
