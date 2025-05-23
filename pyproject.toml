@@ -4,4 +4,8 @@ version = "0.1.0"
 description = "Microphone logging application for audio data acquisition"
 readme = "README.md"
 requires-python = ">=3.11"
-dependencies = []
+dependencies = [
+    "sounddevice>=0.4.6",
+    "soundfile>=0.12.1",
+    "numpy>=1.24.0",
+]

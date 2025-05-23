@@ -20,11 +20,15 @@ pip install -e .
 
 ## Architecture Notes
 
-The planned architecture for this CLI microphone logging application includes:
-- Command-line interface for audio recording control
-- Audio capture and recording capabilities
-- Real-time audio level monitoring in terminal
-- File management for recorded audio sessions
-- Configuration for audio parameters (sample rate, channels, format)
+Current implementation:
+- Simple CLI using argparse for audio recording control
+- Audio capture using python-sounddevice library
+- WAV file output using soundfile library
+- Default microphone recording with configurable sample rate
+- Automatic timestamped filenames
+- Recordings saved to `recordings/` directory
 
-Currently, only a minimal entry point exists at `main.py`.
+Key components:
+- `main.py`: CLI entry point with argument parsing
+- `src/recorder.py`: Core AudioRecorder class using sounddevice callbacks
+- Queue-based audio data collection for smooth recording
