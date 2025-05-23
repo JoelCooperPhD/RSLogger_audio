@@ -31,7 +31,7 @@ async def handle_recording(recorder: AudioRecorder, output_path: Path,
     )
     
     # Setup signal handler for graceful shutdown
-    def signal_handler(sig: int, frame: Optional[FrameType]) -> None:
+    def signal_handler(_sig: int, _frame: Optional[FrameType]) -> None:
         recorder.stop()
         recording_task.cancel()
         
