@@ -1,0 +1,211 @@
+import pytest
+import asyncio
+import json
+from pathlib import Path
+import tempfile
+import numpy as np
+from unittest.mock import Mock, patch, AsyncMock, MagicMock
+
+from src.recorder import AudioRecorder, RecordingConfig
+
+
+class TestAudioRecorder:
+    @pytest.fixture
+    def config(self):
+        return RecordingConfig(
+            samplerate=44100,
+            channels=1,
+            dtype='float32'
+        )
+        
+    @pytest.fixture
+    def recorder(self, config):
+        return AudioRecorder(config)
+        
+    def test_initialization(self, recorder, config):
+        assert recorder.config == config
+        assert recorder._recording is False
+        assert isinstance(recorder._audio_queue, asyncio.Queue)
+        assert recorder._device_info is None
+        
+    def test_audio_callback(self, recorder):
+        # Create mock audio data
+        frames = 1024
+        indata = np.random.random((frames, 1)).astype('float32')
+        
+        # Call the callback
+        recorder._audio_callback(indata, frames, None, None)
+        
+        # Check data was queued
+        assert recorder._audio_queue.qsize() == 1
+        queued_data = recorder._audio_queue.get_nowait()
+        assert np.array_equal(queued_data, indata)
+        
+    def test_audio_callback_with_status(self, recorder, capsys):
+        indata = np.zeros((1024, 1))
+        status = MagicMock()
+        status.__str__.return_value = "Buffer overrun"
+        
+        recorder._audio_callback(indata, 1024, None, status)
+        
+        captured = capsys.readouterr()
+        assert "Audio callback status: Buffer overrun" in captured.out
+        
+    def test_stop_recording(self, recorder):
+        recorder._recording = True
+        recorder.stop()
+        assert recorder._recording is False
+        
+    @pytest.mark.asyncio
+    async def test_get_device_info_default(self, recorder):
+        mock_device = {
+            'name': 'Default Input',
+            'max_input_channels': 2,
+            'default_samplerate': 44100.0
+        }
+        
+        mock_all_devices = [{
+            'name': 'Default Input',
+            'max_input_channels': 2,
+            'default_samplerate': 44100.0
+        }]
+        
+        with patch('sounddevice.query_devices') as mock_query:
+            def query_side_effect(device=None, kind=None):
+                if device is None and kind is None:
+                    return mock_all_devices
+                else:
+                    return mock_device
+            
+            mock_query.side_effect = query_side_effect
+            info = await recorder.get_device_info()
+            
+        assert info['name'] == 'Default Input'
+        assert info['channels'] == 2
+        assert info['samplerate'] == 44100.0
+        
+    @pytest.mark.asyncio
+    async def test_get_device_info_by_id(self, recorder):
+        mock_device = {
+            'name': 'USB Mic',
+            'max_input_channels': 1,
+            'default_samplerate': 48000.0
+        }
+        
+        with patch('sounddevice.query_devices', return_value=mock_device):
+            info = await recorder.get_device_info(1)
+            
+        assert info['id'] == 1
+        assert info['name'] == 'USB Mic'
+        
+    @pytest.mark.asyncio
+    async def test_list_input_devices(self, recorder):
+        mock_devices = [
+            {'name': 'Built-in', 'max_input_channels': 2, 'default_samplerate': 44100},
+            {'name': 'USB Mic', 'max_input_channels': 1, 'default_samplerate': 48000},
+            {'name': 'Output Only', 'max_input_channels': 0, 'default_samplerate': 44100},
+        ]
+        
+        with patch('sounddevice.query_devices', return_value=mock_devices):
+            devices = await recorder.list_input_devices()
+            
+        assert len(devices) == 2  # Only input devices
+        assert devices[0]['id'] == 0
+        assert devices[0]['name'] == 'Built-in'
+        assert devices[1]['id'] == 1
+        assert devices[1]['name'] == 'USB Mic'
+        
+    @pytest.mark.asyncio
+    async def test_save_recording_with_metadata(self, recorder):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            output_path = Path(tmpdir) / "test.wav"
+            
+            # Mock audio data
+            audio_chunks = [
+                np.random.random((1024, 1)).astype('float32')
+                for _ in range(5)
+            ]
+            
+            # Set device info
+            recorder._device_info = {
+                'id': 1,
+                'name': 'Test Device',
+                'channels': 2,
+                'samplerate': 44100
+            }
+            
+            # Mock soundfile.write
+            with patch('soundfile.write'):
+                await recorder._save_recording(audio_chunks, output_path)
+                
+            # Check metadata file was created
+            metadata_path = output_path.with_suffix('.json')
+            assert metadata_path.exists()
+            
+            # Verify metadata content
+            metadata = json.loads(metadata_path.read_text())
+            assert metadata['device']['name'] == 'Test Device'
+            assert metadata['config']['samplerate'] == 44100
+            assert metadata['audio_file'] == 'test.wav'
+            assert 'duration_seconds' in metadata
+            assert 'timestamp' in metadata
+            
+    @pytest.mark.asyncio
+    async def test_save_recording_no_data(self, recorder, capsys):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            output_path = Path(tmpdir) / "test.wav"
+            
+            await recorder._save_recording([], output_path)
+            
+            captured = capsys.readouterr()
+            assert "No audio data recorded" in captured.out
+            assert not output_path.exists()
+            
+    @pytest.mark.asyncio
+    async def test_record_with_duration(self, recorder):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            output_path = Path(tmpdir) / "test.wav"
+            
+            # Mock the audio stream and device info
+            mock_stream = MagicMock()
+            mock_stream.__enter__ = MagicMock(return_value=mock_stream)
+            mock_stream.__exit__ = MagicMock(return_value=None)
+            
+            with patch('sounddevice.InputStream', return_value=mock_stream):
+                with patch.object(recorder, 'get_device_info', new_callable=AsyncMock) as mock_get_info:
+                    with patch.object(recorder, '_save_recording', new_callable=AsyncMock):
+                        mock_get_info.return_value = {'id': 0, 'name': 'Default'}
+                        
+                        # Simulate short recording
+                        async def record_task():
+                            await recorder.record(output_path, duration=0.1)
+                            
+                        await asyncio.wait_for(record_task(), timeout=1.0)
+                        
+            assert recorder._recording is False
+            
+    @pytest.mark.asyncio
+    async def test_record_cancelled(self, recorder):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            output_path = Path(tmpdir) / "test.wav"
+            
+            mock_stream = MagicMock()
+            mock_stream.__enter__ = MagicMock(return_value=mock_stream)
+            mock_stream.__exit__ = MagicMock(return_value=None)
+            
+            with patch('sounddevice.InputStream', return_value=mock_stream):
+                with patch.object(recorder, 'get_device_info', new_callable=AsyncMock):
+                    with patch.object(recorder, '_save_recording', new_callable=AsyncMock):
+                        # Start recording
+                        record_task = asyncio.create_task(
+                            recorder.record(output_path, duration=None)
+                        )
+                        
+                        # Let it start
+                        await asyncio.sleep(0.1)
+                        
+                        # Cancel it
+                        record_task.cancel()
+                        
+                        with pytest.raises(asyncio.CancelledError):
+                            await record_task

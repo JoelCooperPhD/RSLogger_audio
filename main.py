@@ -6,6 +6,7 @@ import signal
 from typing import Optional
 
 from src.recorder import AudioRecorder, RecordingConfig
+from src.config import ConfigManager
 
 
 async def handle_recording(recorder: AudioRecorder, output_path: Path, 
@@ -31,6 +32,10 @@ async def handle_recording(recorder: AudioRecorder, output_path: Path,
         
 
 async def main() -> None:
+    # Load config
+    config_manager = ConfigManager()
+    default_config = config_manager.load()
+    
     parser = argparse.ArgumentParser(
         description="RSLogger Audio - Simple audio recording CLI"
     )
@@ -50,26 +55,115 @@ async def main() -> None:
     parser.add_argument(
         "-r", "--samplerate",
         type=int,
-        default=44100,
-        help="Sample rate in Hz (default: 44100)"
+        default=default_config.samplerate,
+        help=f"Sample rate in Hz (default: {default_config.samplerate})"
+    )
+    
+    parser.add_argument(
+        "-o", "--output-dir",
+        type=str,
+        default=default_config.output_dir,
+        help=f"Output directory (default: {default_config.output_dir})"
+    )
+    
+    parser.add_argument(
+        "-c", "--channels",
+        type=int,
+        default=default_config.channels,
+        help=f"Number of channels (1=mono, 2=stereo, default: {default_config.channels})"
+    )
+    
+    parser.add_argument(
+        "--device",
+        type=str,
+        default=default_config.device,
+        help="Audio input device (name or ID)"
     )
     
     parser.add_argument(
         "--info",
         action="store_true",
-        help="Show default audio device information"
+        help="Show audio device information"
+    )
+    
+    parser.add_argument(
+        "--list-devices",
+        action="store_true",
+        help="List all available input devices"
+    )
+    
+    # Config management arguments
+    parser.add_argument(
+        "--save-config",
+        action="store_true",
+        help="Save current settings as defaults"
+    )
+    
+    parser.add_argument(
+        "--show-config",
+        action="store_true",
+        help="Show current configuration"
+    )
+    
+    parser.add_argument(
+        "--reset-config",
+        action="store_true",
+        help="Reset configuration to defaults"
     )
     
     args = parser.parse_args()
     
+    # Handle config management commands
+    if args.show_config:
+        print("Current configuration:")
+        print(f"  Sample rate: {default_config.samplerate} Hz")
+        print(f"  Channels: {default_config.channels}")
+        print(f"  Output directory: {default_config.output_dir}")
+        print(f"  Data type: {default_config.dtype}")
+        print(f"  Device: {default_config.device or 'Default'}") 
+        print(f"\nConfig file: {config_manager.config_path}")
+        return
+        
+    if args.reset_config:
+        config_manager.reset()
+        print("Configuration reset to defaults")
+        return
+    
+    # Parse device argument
+    device = args.device
+    if device and device.isdigit():
+        device = int(device)
+    
     # Create recorder with configuration
-    config = RecordingConfig(samplerate=args.samplerate)
+    config = RecordingConfig(
+        samplerate=args.samplerate,
+        channels=args.channels,
+        dtype=default_config.dtype,
+        output_dir=args.output_dir,
+        device=device
+    )
+    
+    # Save config if requested
+    if args.save_config:
+        config_manager.save(config)
+        print(f"Configuration saved to {config_manager.config_path}")
+        return
+    
     recorder = AudioRecorder(config)
+    
+    # Handle device listing
+    if args.list_devices:
+        devices = await recorder.list_input_devices()
+        print("Available input devices:")
+        for dev in devices:
+            print(f"  {dev['id']}: {dev['name']} ({dev['channels']} ch, {int(dev['samplerate'])} Hz)")
+        return
     
     # Handle device info request
     if args.info:
-        info = await recorder.get_device_info()
-        print("Default Input Device:")
+        info = await recorder.get_device_info(config.device)
+        device_label = f"Device {info['id']}" if info['id'] is not None else "Default Device"
+        print(f"{device_label}:")
         print(f"  Name: {info['name']}")
         print(f"  Max channels: {info['channels']}")
         print(f"  Default sample rate: {info['samplerate']} Hz")
@@ -79,14 +173,17 @@ async def main() -> None:
     filename = args.filename
     if not filename:
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        filename = f"recording_{timestamp}.wav"
+        # Get device info for filename
+        device_info = await recorder.get_device_info(config.device)
+        device_id = f"_device{device_info['id']}" if device_info['id'] is not None else ""
+        filename = f"recording_{timestamp}{device_id}.wav"
     
     # Ensure .wav extension
     if not filename.endswith('.wav'):
         filename += '.wav'
     
     # Create output path
-    output_path = Path("recordings") / filename
+    output_path = Path(config.output_dir) / filename
     output_path.parent.mkdir(exist_ok=True)
     
     # Start recording
