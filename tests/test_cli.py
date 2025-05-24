@@ -5,7 +5,8 @@ import tempfile
 import sys
 from unittest.mock import patch, AsyncMock, MagicMock
 
-from main import main, handle_recording
+from main import main
+from src.modes import handle_recording
 
 
 class TestCLI:
@@ -122,7 +123,7 @@ class TestCLI:
     @pytest.mark.asyncio
     async def test_record_with_device(self):
         with patch('sys.argv', ['main.py', '--device', '2', '-d', '5']):
-            with patch('main.AudioRecorder') as MockRecorder:
+            with patch('src.recorder.AudioRecorder') as MockRecorder:
                 mock_instance = MockRecorder.return_value
                 mock_instance.record = AsyncMock()
                 from src.devices import AudioDevice
@@ -161,7 +162,7 @@ class TestCLI:
     @pytest.mark.asyncio
     async def test_filename_generation_with_device(self):
         with patch('sys.argv', ['main.py', '--device', '1', '-d', '5']):
-            with patch('main.AudioRecorder') as MockRecorder:
+            with patch('src.recorder.AudioRecorder') as MockRecorder:
                 mock_instance = MockRecorder.return_value
                 mock_instance.record = AsyncMock()
                 from src.devices import AudioDevice

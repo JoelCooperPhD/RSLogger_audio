@@ -35,9 +35,9 @@ Always ask for clarification if requirements are ambiguous, but make reasonable 
 
 ## Project Overview
 
-RSLogger-microphone is a professional audio recording application designed for research data acquisition. It provides both standalone operation and distributed MQTT-based control for integration into larger logging ecosystems.
+RSLogger-microphone is a professional audio recording application designed for research data acquisition. It provides both standalone operation and distributed WebSocket-based control for integration into larger logging ecosystems.
 
-**Current Status**: Fully functional with comprehensive test coverage (85%). The module can operate independently or as part of a distributed system controlled via MQTT.
+**Current Status**: Fully functional with comprehensive test coverage. The module can operate independently or as part of a distributed system controlled via WebSocket.
 
 ## Development Commands
 
@@ -69,10 +69,10 @@ pytest
 pytest -v  # Verbose output
 pytest --cov=src --cov-report=term-missing  # Coverage report
 
-# MQTT Module Operation
-python mqtt_recorder_service.py --id mic1  # Start MQTT-controlled recorder
-python mqtt_recorder_service.py --id mic1 --broker mqtt.example.com  # Custom broker
-python master_controller_example.py  # Run example master controller
+# WebSocket Module Operation
+python ws_recorder_service.py --id mic1  # Start WebSocket-controlled recorder
+python ws_recorder_service.py --id mic1 --server ws://localhost:8080/ws/recorder  # Custom server
+python ws_ui_server.py  # Start the web UI server
 ```
 
 ## Architecture Notes
@@ -93,38 +93,39 @@ python master_controller_example.py  # Run example master controller
 - Graceful interrupt handling (Ctrl+C) with proper cleanup
 - Comprehensive error handling and user feedback
 
-### MQTT Distributed Operation
+### WebSocket Distributed Operation
 
 **Architecture:**
 - Independent process operation - module crashes don't affect other components
-- MQTT pub/sub communication for loose coupling
-- Master-slave control pattern with multiple recorder modules
-- Automatic module discovery and health monitoring
+- WebSocket real-time bidirectional communication
+- Direct client-server pattern with multiple recorder modules
+- Real-time status updates and health monitoring
 - Synchronized recording across multiple devices
 
-**MQTT Components:**
-- `src/mqtt_recorder.py`: MQTT-enabled audio recorder with command handling
-- `src/mqtt_config.py`: Extended configuration for MQTT settings
-- `mqtt_recorder_service.py`: Service entry point for MQTT modules
-- `master_controller_example.py`: Example master controller implementation
+**WebSocket Components:**
+- `ws_recorder_service.py`: WebSocket-enabled audio recorder client
+- `ws_ui_server.py`: FastAPI server managing WebSocket connections
+- Web UI served from `/static_ui/` directory
 
-**MQTT Topics:**
-- `rslogger/audio/{module_id}/command`: Receives control commands
-- `rslogger/audio/{module_id}/status`: Publishes module status
-- `rslogger/audio/{module_id}/response`: Command acknowledgments
-- `rslogger/audio/{module_id}/data`: Data events (recording complete, etc.)
+**WebSocket Message Types:**
+- `register`: Client registration with server
+- `command`: Control commands from server to recorder
+- `status`: Status updates from recorder to server
+- `event`: Recording events (started, completed, error)
+- `devices_list`: Available audio devices information
 
 **Key Components:**
 - `main.py`: Standalone CLI entry point
 - `src/recorder.py`: Core async AudioRecorder class
 - `src/config.py`: Basic configuration management
-- `src/mqtt_recorder.py`: MQTT wrapper for distributed operation
+- `ws_recorder_service.py`: WebSocket client for distributed operation
+- `ws_ui_server.py`: WebSocket server with web UI
 
 **Data Flow:**
 1. Audio callback fills asyncio.Queue with numpy arrays
 2. Async coroutine consumes queue and writes to disk
 3. Metadata JSON created with recording parameters
-4. MQTT events published for master controller tracking
+4. WebSocket events sent for real-time status updates
 5. All operations handled asynchronously for optimal performance
 
 ## Dependencies
@@ -134,7 +135,9 @@ Core dependencies as defined in `pyproject.toml`:
 - sounddevice: Cross-platform audio I/O
 - soundfile: Reading and writing audio files
 - numpy: Efficient array operations for audio data
-- asyncio-mqtt: MQTT client for distributed operation
+- fastapi: Modern web framework for WebSocket server
+- uvicorn: ASGI server for running FastAPI
+- websockets: WebSocket client/server implementation
 
 Development dependencies:
 - pytest: Testing framework
@@ -148,8 +151,6 @@ The project includes a comprehensive test suite with 85% code coverage:
 - `tests/test_recorder.py`: Tests for audio recording functionality
 - `tests/test_config.py`: Tests for configuration management
 - `tests/test_cli.py`: Tests for CLI argument parsing
-- `tests/test_mqtt_recorder.py`: Tests for MQTT recorder functionality
-- `tests/test_mqtt_config.py`: Tests for MQTT configuration
 - `tests/conftest.py`: Shared pytest fixtures
 
 Run tests with coverage:
@@ -171,18 +172,17 @@ python main.py --duration 30 --samplerate 48000 --channels 2
 python main.py --device "USB Microphone" --duration 60
 ```
 
-### Distributed MQTT Recording
+### Distributed WebSocket Recording
 ```bash
-# Terminal 1 - Start MQTT broker
-mosquitto -v
+# Terminal 1 - Start WebSocket UI server
+python ws_ui_server.py --port 8080
 
 # Terminal 2 - Start first recorder module
-python mqtt_recorder_service.py --id mic1
+python ws_recorder_service.py --id mic1
 
 # Terminal 3 - Start second recorder module  
-python mqtt_recorder_service.py --id mic2 --device "USB Audio"
+python ws_recorder_service.py --id mic2 --device "USB Audio"
 
-# Terminal 4 - Control from master
-python master_controller_example.py
-# Then use menu to start/stop recordings on all modules
+# Access the web UI at http://localhost:8080
+# Use the web interface to start/stop recordings on all modules
 ```

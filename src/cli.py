@@ -21,6 +21,8 @@ class CLIArgs:
     save_config: bool
     show_config: bool
     reset_config: bool
+    controlled: bool
+    control_url: str
 
 
 def create_parser(default_config: RecordingConfig) -> argparse.ArgumentParser:
@@ -100,6 +102,20 @@ def create_parser(default_config: RecordingConfig) -> argparse.ArgumentParser:
         help="Reset configuration to defaults"
     )
     
+    # Controlled mode
+    parser.add_argument(
+        "--controlled",
+        action="store_true",
+        help="Run in controlled mode - expose recorder controls via WebSocket"
+    )
+    
+    parser.add_argument(
+        "--control-url",
+        type=str,
+        default="ws://localhost:8080/recorder",
+        help="WebSocket URL for control connection (default: ws://localhost:8080/recorder)"
+    )
+    
     return parser
 
 
@@ -129,5 +145,7 @@ def parse_args(default_config: RecordingConfig) -> CLIArgs:
         list_devices=args.list_devices,
         save_config=args.save_config,
         show_config=args.show_config,
-        reset_config=args.reset_config
+        reset_config=args.reset_config,
+        controlled=args.controlled,
+        control_url=args.control_url
     )
